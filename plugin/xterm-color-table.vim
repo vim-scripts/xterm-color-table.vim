@@ -7,7 +7,7 @@
 "
 "                                       guns <sung@metablu.com>
 
-" Version:  1.2
+" Version:  1.3
 " License:  MIT
 " Homepage: http://github.com/guns/xterm-color-table.vim
 "
@@ -15,6 +15,8 @@
 "
 "   * Provides command :XtermColorTable
 "   * Xterm numbers on the left, equivalent RGB values embedded on the right
+"   * Press `t' to toggle RGB text visibility
+"   * Press `f' while on a color to set the RGB text to that color
 "   * Buffer behavior similar to Scratch.vim
 "
 " INSPIRED BY:
@@ -31,15 +33,46 @@ augroup XtermColorTable "{{{
     autocmd Colorscheme * call <SID>XtermColorTable(0)
 augroup END "}}}
 
+function! <SID>HighlightCell(n, bfg) "{{{
+    let rgb = s:xterm_colors[a:n]
+
+    " Clear any extant values
+    execute 'highlight fg_'.a:n.' ctermfg=none ctermbg=none guifg=none guibg=none'
+    execute 'highlight bg_'.a:n.' ctermfg=none ctermbg=none guifg=none guibg=none'
+
+    " bfg has three states:
+    "   * black or white depending on intensity
+    "   * same as background
+    "   * given value
+    if a:bfg == -2
+        let sum = 0
+        for val in map(split(substitute(rgb, '^#', '', ''), '\v\x{2}\zs'), 'str2nr(v:val, 16)')
+            " TODO: does Vimscript have a fold/reduce function?
+            let sum += val
+        endfor
+        let bfg = sum > (0xff * 1.5) ? 0 : 15
+    elseif a:bfg == -1
+        let bfg = a:n
+    else
+        let bfg = a:bfg
+    endif
+
+    execute 'highlight fg_'.a:n.' ctermfg='.a:n.' guifg='.rgb
+    execute 'highlight bg_'.a:n.' ctermbg='.a:n.' guibg='.rgb
+    execute 'highlight bg_'.a:n.' ctermfg='.bfg.' guifg='.s:xterm_colors[bfg]
+endfunction "}}}
+
+function! <SID>HighlightTable(bfg) "{{{
+    for val in range(0, 0xff) | call <SID>HighlightCell(val, a:bfg) | endfor
+endfunction "}}}
+
 function! <SID>ColorCell(n) "{{{
     let rgb = s:xterm_colors[a:n]
 
     execute 'syntax match fg_'.a:n.' " '.a:n.' " containedin=ALL'
     execute 'syntax match bg_'.a:n.' "'. rgb .'" containedin=ALL'
 
-    execute 'highlight    fg_'.a:n.' ctermfg='.a:n.' guifg='.rgb
-    execute 'highlight    bg_'.a:n.' ctermbg='.a:n.' guibg='.rgb
-    execute 'highlight    bg_'.a:n.' ctermfg='.a:n.' guifg='.rgb
+    call <SID>HighlightCell(a:n, -1)
 
     return printf('%5s%7s', ' '.a:n.' ', rgb)
 endfunction "}}}
@@ -75,6 +108,38 @@ function! <SID>SetBufferOptions() "{{{
     setlocal nomodified nomodifiable noswapfile readonly
     setlocal nocursorline nocursorcolumn
     setlocal iskeyword+=#
+
+    let b:RgbVisible = 0
+    let b:bfg = -2
+
+    map <silent><buffer> t :call <SID>ToggleRgbVisibility()<CR>
+    map <silent><buffer> f :call <SID>SetRgbForeground(expand('<cword>'))<CR>
+endfunction "}}}
+
+function! <SID>ToggleRgbVisibility(...) "{{{
+    if b:RgbVisible
+        let bfg = -1
+    else
+        let bfg = b:bfg
+    endif
+    let b:RgbVisible = (b:RgbVisible + 1) % 2
+
+    call <SID>HighlightTable(bfg)
+endfunction "}}}
+
+function! <SID>SetRgbForeground(cword) "{{{
+    if len(a:cword)
+        let sname = synIDattr(synID(line('.'), col('.'), 0), 'name')
+        let b:bfg = substitute(sname, '\v^\w+_', '', '') + 0
+    else
+        let b:bfg = -2
+    endif
+
+    if b:RgbVisible
+        call <SID>HighlightTable(b:bfg)
+    else
+        call <SID>ToggleRgbVisibility()
+    endif
 endfunction "}}}
 
 function! <SID>XtermColorTable(open) "{{{
