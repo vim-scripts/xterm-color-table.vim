@@ -1,22 +1,23 @@
 
-"   __   __)              )   ___                  ______)
-"  (,  |/                (__/_____)    /)         (, /       /)  /)
-"      |  _/_  _  __ ___   /       ___// _____      /   _   (/_ //  _
-"   ) /|_ (___(/_/ (_// (_/       (_)(/_(_)/ (_  ) /   (_(_/_) (/__(/_
-"  (_/                   (______)               (_/
+"   ___  __)                   )   ___                  ______)
+"  (,  |/                     (__/_____)   /)          (, /      /)  /)
+"      |  _/_  _  __  ____      /      ___// _____       /  _   (/_ //  _
+"   ) /|_ (___(/_/ (_/ / /_  (_/      (_)(/_(_)/ (_   ) /  (_(_/_) (/__(/_
+"  (_/                        (______)               (_/
 "
-"                                       guns <sung@metablu.com>
+"                                           guns <self@sungpae.com>
 
-" Version:  1.4
+" Version:  1.6
 " License:  MIT
 " Homepage: http://github.com/guns/xterm-color-table.vim
 "
 " NOTES:
 "
-"   * Provides command :XtermColorTable
-"   * Xterm numbers on the left, equivalent RGB values embedded on the right
-"   * Press `t' to toggle RGB text visibility
-"   * Press `f' while on a color to set the RGB text to that color
+"   * Provides command :XtermColorTable, as well as variants for different splits
+"   * Xterm numbers on the left, equivalent RGB values on the right
+"   * Press `#` to yank current color (shortcut for yiw)
+"   * Press `t` to toggle RGB text visibility
+"   * Press `f` to set RGB text to current color
 "   * Buffer behavior similar to Scratch.vim
 "
 " INSPIRED BY:
@@ -25,65 +26,54 @@
 "   * http://vim.wikia.com/wiki/Xterm256_color_names_for_console_Vim
 "   * http://www.vim.org/scripts/script.php?script_id=664
 
-command! XtermColorTable call <SID>XtermColorTable(1)
+
+" We have a dependency on buffer-local autocommands
+if version < 700
+    echo 'FAIL: XtermColorTable requires vim 7.0+'
+    finish
+endif
+
+let s:bufname = '__XtermColorTable__'
+
+if !exists('g:XtermColorTableDefaultOpen')
+    let g:XtermColorTableDefaultOpen = 'split'
+endif
+
+
+command! XtermColorTable  execute 'call <SID>XtermColorTable(g:XtermColorTableDefaultOpen)'
+command! SXtermColorTable call <SID>XtermColorTable('split')
+command! VXtermColorTable call <SID>XtermColorTable('vsplit')
+command! TXtermColorTable call <SID>XtermColorTable('tabnew')
+command! EXtermColorTable call <SID>XtermColorTable('edit')
+command! OXtermColorTable call <SID>XtermColorTable('edit') | only
+
 
 augroup XtermColorTable "{{{
     autocmd!
-    autocmd BufNewFile __XtermColorTable__ call <SID>ColorTable()
-    autocmd Colorscheme * call <SID>XtermColorTable(0)
+    autocmd BufNewFile  __XtermColorTable__ call <SID>ColorTable()
+    autocmd ColorScheme *                   silent! doautoall XtermColorTableBuffer ColorScheme
 augroup END "}}}
 
-function! <SID>HighlightCell(n, bfg) "{{{
-    let rgb = s:xterm_colors[a:n]
 
-    " Clear any extant values
-    execute 'highlight fg_'.a:n.' ctermfg=NONE ctermbg=NONE guifg=NONE guibg=NONE'
-    execute 'highlight bg_'.a:n.' ctermfg=NONE ctermbg=NONE guifg=NONE guibg=NONE'
+function! <SID>XtermColorTable(open) "{{{
+    let bufid = bufnr(s:bufname)
+    let winid = bufwinnr(bufid)
 
-    " bfg has three states:
-    "   * black or white depending on intensity
-    "   * same as background
-    "   * given value
-    if a:bfg == -2
-        let sum = 0
-        for val in map(split(substitute(rgb, '^#', '', ''), '\v\x{2}\zs'), 'str2nr(v:val, 16)')
-            " TODO: does Vimscript have a fold/reduce function?
-            let sum += val
-        endfor
-        let bfg = sum > (0xff * 1.5) ? 0 : 15
-    elseif a:bfg == -1
-        let bfg = a:n
-    else
-        let bfg = a:bfg
+    if bufid == -1
+        " Create new buffer
+        execute a:open.' '.s:bufname
+        return
+    elseif winid != -1 && winnr('$') > 1
+        " Close extant window
+        execute winid.'wincmd w' | close
     endif
 
-    execute 'highlight fg_'.a:n.' ctermfg='.a:n.' guifg='.rgb
-    execute 'highlight bg_'.a:n.' ctermbg='.a:n.' guibg='.rgb
-    execute 'highlight bg_'.a:n.' ctermfg='.bfg.' guifg='.s:xterm_colors[bfg]
+    " Open extant buffer
+    execute a:open.' +buffer'.bufid
 endfunction "}}}
 
-function! <SID>HighlightTable(bfg) "{{{
-    for val in range(0, 0xff) | call <SID>HighlightCell(val, a:bfg) | endfor
-endfunction "}}}
-
-function! <SID>ColorCell(n) "{{{
-    let rgb = s:xterm_colors[a:n]
-
-    execute 'syntax match fg_'.a:n.' " '.a:n.' " containedin=ALL'
-    execute 'syntax match bg_'.a:n.' "'. rgb .'" containedin=ALL'
-
-    call <SID>HighlightCell(a:n, -1)
-
-    return printf('%5s%7s', ' '.a:n.' ', rgb)
-endfunction "}}}
-
-function! <SID>ColorRow(start, end) "{{{
-    return join(map(range(a:start, a:end), '<SID>ColorCell(v:val)'))
-endfunction "}}}
 
 function! <SID>ColorTable() "{{{
-    highlight clear | syntax clear
-
     let rows = []
 
     call add(rows, <SID>ColorRow(0,  7))
@@ -99,9 +89,62 @@ function! <SID>ColorTable() "{{{
 
     if &modifiable
         call append(0, rows)
+        call append(len(rows) + 1, <SID>HelpComment())
         call <SID>SetBufferOptions()
     endif
 endfunction "}}}
+
+
+function! <SID>ColorRow(start, end) "{{{
+    return join(map(range(a:start, a:end), '<SID>ColorCell(v:val)'))
+endfunction "}}}
+
+
+function! <SID>ColorCell(n) "{{{
+    let rgb = s:xterm_colors[a:n]
+
+    " Clear extant values
+    execute 'silent! syntax clear fg_'.a:n
+    execute 'silent! syntax clear bg_'.a:n
+
+    execute 'syntax match fg_'.a:n.' " '.a:n.' " containedin=ALL'
+    execute 'syntax match bg_'.a:n.' "'. rgb .'" containedin=ALL'
+
+    call <SID>HighlightCell(a:n, -1)
+
+    return printf(' %3s %7s', a:n, rgb)
+endfunction "}}}
+
+
+function! <SID>HighlightCell(n, bgf) "{{{
+    let rgb = s:xterm_colors[a:n]
+
+    " bgf has three states:
+    "   -2) black or white depending on intensity
+    "   -1) same as background
+    "   0+) xterm color value
+    if a:bgf == -2
+        let sum = 0
+        for val in map(split(substitute(rgb, '^#', '', ''), '\v\x{2}\zs'), 'str2nr(v:val, 16)')
+            " TODO: does Vimscript have a fold/reduce function?
+            let sum += val
+        endfor
+        let bgf = sum > (0xff * 1.5) ? 0 : 15
+    elseif a:bgf == -1
+        let bgf = a:n
+    else
+        let bgf = a:bgf
+    endif
+
+    " Clear any extant values
+    execute 'silent! highlight clear fg_'.a:n
+    execute 'silent! highlight clear bg_'.a:n
+
+    execute 'highlight fg_'.a:n.' ctermfg='.a:n.' guifg='.rgb
+    execute 'highlight bg_'.a:n.' ctermbg='.a:n.' guibg='.rgb
+    execute 'highlight bg_'.a:n.' ctermfg='.bgf.' guifg='.s:xterm_colors[bgf]
+endfunction "}}}
+
 
 function! <SID>SetBufferOptions() "{{{
     setlocal buftype=nofile bufhidden=hide buflisted
@@ -109,60 +152,62 @@ function! <SID>SetBufferOptions() "{{{
     setlocal nocursorline nocursorcolumn
     setlocal iskeyword+=#
 
-    let b:RgbVisible = 0
-    let b:bfg = -2
+    let b:XtermColorTableRgbVisible = 0
+    let b:XtermColorTableBGF = -2
 
-    map <silent><buffer> t :call <SID>ToggleRgbVisibility()<CR>
-    map <silent><buffer> f :call <SID>SetRgbForeground(expand('<cword>'))<CR>
+    nmap <silent><buffer> # yiw:echo 'yanked: '.@"<CR>
+    nmap <silent><buffer> t :call <SID>ToggleRgbVisibility()<CR>
+    nmap <silent><buffer> f :call <SID>SetRgbForeground(expand('<cword>'))<CR>
+
+    " Colorschemes often call `highlight clear';
+    " register a handler to deal with this
+    augroup XtermColorTableBuffer
+        autocmd! * <buffer>
+        autocmd ColorScheme <buffer> call <SID>HighlightTable(-1)
+    augroup END
 endfunction "}}}
 
-function! <SID>ToggleRgbVisibility(...) "{{{
-    if b:RgbVisible
-        let bfg = -1
-    else
-        let bfg = b:bfg
-    endif
-    let b:RgbVisible = (b:RgbVisible + 1) % 2
 
-    call <SID>HighlightTable(bfg)
+function! <SID>HelpComment() "{{{
+    " we have to define our own comment type
+    silent! syntax clear XtermColorTableComment
+    syntax match XtermColorTableComment ';.*'
+    highlight link XtermColorTableComment Comment
+
+    let lines = []
+    call add(lines, "; # to copy current color (yiw)")
+    call add(lines, "; t to toggle RGB visibility")
+    call add(lines, "; f to set RGB foreground color")
+
+    return lines
 endfunction "}}}
+
+
+function! <SID>ToggleRgbVisibility() "{{{
+    let bgf = b:XtermColorTableRgbVisible ? -1 : b:XtermColorTableBGF
+    let b:XtermColorTableRgbVisible = (b:XtermColorTableRgbVisible + 1) % 2
+
+    call <SID>HighlightTable(bgf)
+endfunction "}}}
+
+
+function! <SID>HighlightTable(bgf) "{{{
+    for val in range(0, 0xff) | call <SID>HighlightCell(val, a:bgf) | endfor
+endfunction "}}}
+
 
 function! <SID>SetRgbForeground(cword) "{{{
     if len(a:cword)
         let sname = synIDattr(synID(line('.'), col('.'), 0), 'name')
-        let b:bfg = substitute(sname, '\v^\w+_', '', '') + 0
+        let b:XtermColorTableBGF = substitute(sname, '\v^\w+_', '', '') + 0
     else
-        let b:bfg = -2
+        let b:XtermColorTableBGF = -2
     endif
 
-    if b:RgbVisible
-        call <SID>HighlightTable(b:bfg)
+    if b:XtermColorTableRgbVisible
+        call <SID>HighlightTable(b:XtermColorTableBGF)
     else
         call <SID>ToggleRgbVisibility()
-    endif
-endfunction "}}}
-
-function! <SID>XtermColorTable(open) "{{{
-    let bufname = '__XtermColorTable__'
-    let bufid   = bufnr(bufname)
-    let winid   = bufwinnr(bufid)
-
-    if a:open
-        if bufid == -1
-            " Create new buffer
-            execute 'new '.bufname
-        elseif winid != -1
-            " Switch to extant window
-            execute winid.'wincmd w'
-        else
-            " Reopen extant buffer
-            execute 'split +buffer'.bufid
-        endif
-    else
-        if bufid != -1
-            " Destroy extant buffer
-            silent execute bufid.'bwipeout'
-        endif
     endif
 endfunction "}}}
 
